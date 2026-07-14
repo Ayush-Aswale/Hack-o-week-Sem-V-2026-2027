@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student Management System</title>
+    <!-- Link to Custom Stylesheet -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <!-- FontAwesome for Premium Modern Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+
+    <div class="container">
+        <!-- Dashboard Header -->
+        <header>
+            <h1><i class="fa-solid fa-graduation-cap"></i> Student Directory</h1>
+            <p>Flask & SQLite REST API Management Panel</p>
+        </header>
+
+        <!-- Main Dashboard Grid -->
+        <div class="dashboard-grid">
+            
+            <!-- Left Panel: Form Card (Add/Edit Student) -->
+            <div class="card">
+                <h2 id="form-title">Add Student</h2>
+                <form id="student-form">
+                    <!-- Hidden field to store Student ID during edit operations -->
+                    <input type="hidden" id="student-id">
+                    
+                    <div class="form-group">
+                        <label for="name"><i class="fa-solid fa-user"></i> Full Name</label>
+                        <input type="text" id="name" placeholder="John Doe" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="age"><i class="fa-solid fa-calendar-days"></i> Age</label>
+                        <input type="number" id="age" placeholder="20" min="1" max="120" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="branch"><i class="fa-solid fa-code"></i> Branch / Major</label>
+                        <input type="text" id="branch" placeholder="Computer Science" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="email"><i class="fa-solid fa-envelope"></i> Email Address</label>
+                        <input type="email" id="email" placeholder="john.doe@example.com" required>
+                    </div>
+
+                    <div class="btn-group">
+                        <button type="submit" id="submit-btn" class="btn btn-primary">
+                            <i class="fa-solid fa-plus"></i> Add Student
+                        </button>
+                        <button type="button" id="cancel-btn" class="btn btn-secondary" style="display: none;" onclick="resetForm()">
+                            Cancel
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Right Panel: Student List Card -->
+            <div class="card">
+                <h2>Student Records</h2>
+                <div class="table-container">
+                    <table id="students-table">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Name</th>
+                                <th>Age</th>
+                                <th>Branch</th>
+                                <th>Email</th>
+                                <th style="text-align: center;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="students-body">
+                            <!-- Dynamic Content Inserted by JavaScript -->
+                        </tbody>
+                    </table>
+                    
+                    <!-- Displayed when table is empty -->
+                    <div id="no-data" class="empty-state" style="display: none;">
+                        <i class="fa-regular fa-folder-open"></i>
+                        <p>No student records found. Add one on the left!</p>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Toast Notifications Container -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- JavaScript REST API Integration -->
+    <script>
+        // API Base URL (Relative path to Flask dev server)
+        const API_URL = '/students';
+
+        // DOM elements cache
+        const studentForm = document.getElementById('student-form');
+        const studentIdInput = document.getElementById('student-id');
+        const nameInput = document.getElementById('name');
+        const ageInput = document.getElementById('age');
+        const branchInput = document.getElementById('branch');
+        const emailInput = document.getElementById('email');
+        const submitBtn = document.getElementById('submit-btn');
+        const cancelBtn = document.getElementById('cancel-btn');
+        const formTitle = document.getElementById('form-title');
+        const studentsBody = document.getElementById('students-body');
+        const noData = document.getElementById('no-data');
+
+        // Execute fetch on page load
+        document.addEventListener('DOMContentLoaded', fetchStudents);
+
+        /**
+         * Fetch all students (GET) from REST API
+         */
+        async function fetchStudents() {
+            try {
+                const response = await fetch(API_URL);
+                if (!response.ok) {
+                    throw new Error('Failed to retrieve students list.');
+                }
+                const students = await response.json();
+                renderTable(students);
+            } catch (error) {
+                showToast(error.message, 'error');
+            }
+        }
+
+        /**
+         * Render the records table dynamically
+         */
+        function renderTable(students) {
+            studentsBody.innerHTML = '';
+            
+            if (students.length === 0) {
+                noData.style.display = 'block';
+                return;
+            }
+            noData.style.display = 'none';
+
+            students.forEach(student => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td><span class="badge">#${student.id}</span></td>
+                    <td><strong>${escapeHTML(student.name)}</strong></td>
+                    <td>${student.age}</td>
+                    <td>${escapeHTML(student.branch)}</td>
+                    <td>${escapeHTML(student.email)}</td>
+                    <td style="text-align: center; white-space: nowrap;">
+                        <button class="action-btn edit" onclick="editStudent(${JSON.stringify(student).replace(/"/g, '&quot;')})" title="Edit Student">
+                            <i class="fa-solid fa-pen-to-square"></i>
+                        </button>
+                        <button class="action-btn delete" onclick="deleteStudent(${student.id})" title="Delete Student">
+                            <i class="fa-solid fa-trash-can"></i>
+                        </button>
+                    </td>
+                `;
+                studentsBody.appendChild(row);
+            });
+        }
+
+        /**
+         * Form Submit Event Handler (Handles both Create and Update)
+         */
+        studentForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            // Assemble the JSON data payload
+            const payload = {
+                name: nameInput.value,
+                age: parseInt(ageInput.value, 10),
+                branch: branchInput.value,
+                email: emailInput.value
+            };
+
+            const studentId = studentIdInput.value;
+            const isUpdate = studentId !== '';
+
+            try {
+                let response;
+                if (isUpdate) {
+                    // Update Operation: PUT /students/<id>
+                    response = await fetch(`${API_URL}/${studentId}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                } else {
+                    // Create Operation: POST /students
+                    response = await fetch(API_URL, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                }
+
+                const result = await response.json();
+
+                if (!response.ok) {
+                    // Throw the precise error message sent by Flask backend
+                    throw new Error(result.error || 'Something went wrong');
+                }
+
+                // Show success feedback
+                showToast(result.message || 'Operation successful', 'success');
+                
+                // Refresh list and reset form
+                resetForm();
+                fetchStudents();
+            } catch (error) {
+                showToast(error.message, 'error');
+            }
+        });
+
+        /**
+         * Delete student operation (DELETE)
+         */
+        async function deleteStudent(id) {
+            if (!confirm('Are you sure you want to delete this student record?')) return;
+
+            try {
+                const response = await fetch(`${API_URL}/${id}`, {
+                    method: 'DELETE'
+                });
+                const result = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(result.error || 'Failed to delete student');
+                }
+
+                showToast(result.message, 'success');
+                // If currently editing the deleted student, reset the form state
+                if (studentIdInput.value === id.toString()) {
+                    resetForm();
+                }
+                fetchStudents();
+            } catch (error) {
+                showToast(error.message, 'error');
+            }
+        }
+
+        /**
+         * Triggers editing mode: Populates input fields from table row data
+         */
+        function editStudent(student) {
+            formTitle.textContent = 'Edit Student';
+            studentIdInput.value = student.id;
+            nameInput.value = student.name;
+            ageInput.value = student.age;
+            branchInput.value = student.branch;
+            emailInput.value = student.email;
+
+            submitBtn.innerHTML = '<i class="fa-solid fa-check"></i> Update Student';
+            cancelBtn.style.display = 'inline-block';
+            
+            // Scroll form card into view on mobile
+            studentForm.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        /**
+         * Resets the form state back to default Add mode
+         */
+        function resetForm() {
+            studentForm.reset();
+            studentIdInput.value = '';
+            formTitle.textContent = 'Add Student';
+            submitBtn.innerHTML = '<i class="fa-solid fa-plus"></i> Add Student';
+            cancelBtn.style.display = 'none';
+        }
+
+        /**
+         * Helper: Creates and displays toast notifications at bottom right
+         */
+        function showToast(message, type = 'success') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            
+            const icon = type === 'success' ? 'fa-circle-check' : 'fa-circle-exclamation';
+            
+            toast.innerHTML = `
+                <span><i class="fa-solid ${icon}"></i> &nbsp; ${message}</span>
+            `;
+            
+            container.appendChild(toast);
+
+            // Auto dismiss toast after 4 seconds
+            setTimeout(() => {
+                toast.style.animation = 'slideIn 0.3s ease reverse forwards';
+                // Wait for exit animation to finish before removing from DOM
+                setTimeout(() => toast.remove(), 300);
+            }, 4000);
+        }
+
+        /**
+         * Security Helper: Prevents HTML injection attacks
+         */
+        function escapeHTML(str) {
+            return str.replace(/[&<>'"]/g, 
+                tag => ({
+                    '&': '&amp;',
+                    '<': '&lt;',
+                    '>': '&gt;',
+                    "'": '&#39;',
+                    '"': '&quot;'
+                }[tag] || tag)
+            );
+        }
+    </script>
+</body>
+</html>
